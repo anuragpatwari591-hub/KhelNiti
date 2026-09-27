@@ -115,6 +115,9 @@ spec. Current status:
   structured logging and `/health` endpoints exist; Prometheus/Grafana-style
   aggregation does not.
 - **In-app AI assistant** — not implemented.
+- **Frontend automated tests** — `apps/web` was verified manually (real
+  browser checks, a clean `npm run build`); no Jest/Playwright suite exists
+  yet (see `tests/frontend/README.md`).
 - **XGBoost/LightGBM/Bayesian/time-series model variants** — the ensemble
   currently uses logistic regression + Monte Carlo + Dixon-Coles Poisson,
   chosen because they are honest, interpretable baselines that don't
