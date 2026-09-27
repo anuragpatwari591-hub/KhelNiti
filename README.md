@@ -94,25 +94,35 @@ scripts/            setup, migrate, seed, train
 ## Quickstart (local, no Docker)
 
 Requirements: Python 3.11+, Node 20+, PostgreSQL 16 (or Docker for it).
+All commands below run from the **repo root** — the backend, `ml`, `data`,
+and `database` packages import each other as top-level siblings.
 
 ```bash
 cp .env.example .env
 
 # --- Database ---
-# Option A: run Postgres yourself and point DATABASE_URL at it.
+# Option A: run Postgres yourself, create a `khelniti` role/db, and point
+#           DATABASE_URL at it (see .env.example for the expected shape).
 # Option B: docker compose up -d postgres
 
+# --- One-time setup ---
+scripts/setup.sh          # creates backend/.venv, installs backend + frontend deps
+
+# --- Database schema + optional mock data ---
+scripts/migrate.sh        # alembic upgrade head
+scripts/seed.sh           # optional: loads mock dev matches, clearly labeled data_quality=mock
+
+# --- Train the models (writes ml/artifacts/*.joblib + DB rows) ---
+scripts/train.sh
+
 # --- Backend ---
-cd backend
-python -m venv .venv && source .venv/bin/activate
-pip install -r requirements.txt
-alembic upgrade head
-python -m scripts.seed_mock_data   # optional: loads mock dev data, clearly labeled
-uvicorn app.main:app --reload --port 8000
+source backend/.venv/bin/activate
+uvicorn backend.app.main:app --reload --port 8000
 
 # --- Frontend (new terminal) ---
 cd apps/web
 npm install
+cp .env.local.example .env.local
 npm run dev
 ```
 
@@ -126,31 +136,35 @@ cp .env.example .env
 docker compose up --build
 ```
 
-This starts Postgres, the backend API, and the web frontend.
+This starts Postgres, the backend API (running its own `alembic upgrade
+head` on boot), and the web frontend. Run `scripts/seed.sh` and
+`scripts/train.sh` against the containerized Postgres afterward (or from
+inside the `backend` container) to get mock data and trained models.
 
 ## Running tests
 
 ```bash
-cd backend
-pip install -r requirements.txt
-pytest ../tests/backend ../tests/data -v
-
-cd ../ml
-pip install -r ../backend/requirements.txt
-pytest ../tests/ml -v
+scripts/test.sh
 ```
+
+Equivalent to `pytest tests/backend tests/ml tests/data -v` from the repo
+root. The backend/data tests need a reachable `DATABASE_URL_TEST`
+PostgreSQL database (see `.env.example`) — they create and tear down real
+tables and run each test in a rolled-back transaction.
 
 ## Training / backtesting models
 
 ```bash
-cd ml
-python -m training.train_cricket_win_probability
-python -m backtesting.run_backtest --sport cricket --model win_probability
+scripts/train.sh
+# equivalent to:
+python -m ml.training.train_cricket_win_probability
+python -m ml.training.train_football_expected_goals
 ```
 
 Every trained model is versioned (`model_versions` table) and every
 backtest run is persisted (`backtest_runs`) — nothing is thrown away, wins
-or losses.
+or losses. See [docs/BACKTESTING.md](docs/BACKTESTING.md) for the current
+numbers and methodology.
 
 ## Documentation
 
