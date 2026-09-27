@@ -1,9 +1,13 @@
 """Mock football data provider — development/test only.
 
-Generates synthetic fixtures with team "attack"/"defense" strengths drawn
-per-match from a seeded RNG and goals sampled from a Poisson process, which
+Generates synthetic fixtures where each team has a fixed, persistent
+attack/defense strength (`_TEAM_ATTACK`/`_TEAM_DEFENSE`, seeded once at
+import time — not redrawn per match) and each match's goals are sampled
+from a Poisson process whose rate combines both teams' strengths plus a
+home-advantage multiplier and a small amount of match-to-match noise. This
 is exactly the generative assumption the Dixon-Coles expected-goals model
-(`ml/football/expected_goals.py`) fits — so backtesting against this mock
+(`ml/football/expected_goals.py`) fits — a team-identity-agnostic generator
+would give the estimator nothing to learn, so backtesting against this
 corpus is a genuine test of the estimator, not just a smoke test. Every
 payload carries `data_quality=DataQuality.MOCK`.
 
@@ -25,6 +29,23 @@ _TEAMS = [
 ]
 _FIRST_NAMES = ["Leo", "Marco", "Diego", "Hugo", "Luca", "Theo", "Noah", "Elias", "Mateo", "Kian"]
 _LAST_NAMES = ["Costa", "Ferreira", "Novak", "Ibrahim", "Larsson", "Dubois", "Moreno", "Haas"]
+
+_BASE_GOAL_RATE = 1.3
+_HOME_ADVANTAGE = 1.25
+
+
+def _fixed_team_strengths() -> tuple[dict[str, float], dict[str, float]]:
+    """Deterministic, match-independent per-team strength multipliers
+    (seeded once, not per match) so a team's identity actually predicts its
+    scoring behavior — the property the xG model is trying to learn.
+    """
+    rng = random.Random("khelniti-mock-football-team-strengths")
+    attack = {team: max(0.5, rng.gauss(1.0, 0.28)) for team in _TEAMS}
+    defense = {team: max(0.5, rng.gauss(1.0, 0.28)) for team in _TEAMS}
+    return attack, defense
+
+
+_TEAM_ATTACK, _TEAM_DEFENSE = _fixed_team_strengths()
 
 
 def _mock_name(rng: random.Random) -> str:
@@ -94,14 +115,24 @@ class MockFootballProvider(FootballDataProvider):
         rng = self._rng_for(match_external_ref)
         base_time = datetime.now(timezone.utc) - timedelta(hours=2)
 
-        # League-average ~1.35 goals/team/match, with per-match multiplicative
-        # attack strength noise so matches vary (mirrors real team quality
-        # variance without claiming to model any specific real team).
-        home_attack = max(0.3, rng.gauss(1.45, 0.35))  # home advantage baked in
-        away_attack = max(0.3, rng.gauss(1.15, 0.35))
+        home_name = _TEAMS[hash(match_external_ref) % len(_TEAMS)]
+        away_name = _TEAMS[(hash(match_external_ref) + 1) % len(_TEAMS)]
 
-        home_goals = _poisson(rng, home_attack)
-        away_goals = _poisson(rng, away_attack)
+        # Goal rate = league base rate x this team's attack x opponent's
+        # defensive leakiness x home advantage x small per-match noise.
+        # Team strengths are fixed (see _fixed_team_strengths) — only the
+        # noise term varies match to match.
+        home_mu = (
+            _BASE_GOAL_RATE * _TEAM_ATTACK[home_name] * _TEAM_DEFENSE[away_name]
+            * _HOME_ADVANTAGE * max(0.4, rng.gauss(1.0, 0.15))
+        )
+        away_mu = (
+            _BASE_GOAL_RATE * _TEAM_ATTACK[away_name] * _TEAM_DEFENSE[home_name]
+            * max(0.4, rng.gauss(1.0, 0.15))
+        )
+
+        home_goals = _poisson(rng, home_mu)
+        away_goals = _poisson(rng, away_mu)
 
         events: list[FootballEventPayload] = []
 
@@ -124,8 +155,6 @@ class MockFootballProvider(FootballDataProvider):
                     )
                 )
 
-        home_name = _TEAMS[hash(match_external_ref) % len(_TEAMS)]
-        away_name = _TEAMS[(hash(match_external_ref) + 1) % len(_TEAMS)]
         _add_goals(home_goals, home_name)
         _add_goals(away_goals, away_name)
 
@@ -166,8 +195,8 @@ class MockFootballProvider(FootballDataProvider):
             events=events,
             home_goals=home_goals,
             away_goals=away_goals,
-            home_attack=home_attack,
-            away_attack=away_attack,
+            home_attack=home_mu,
+            away_attack=away_mu,
         )
 
     def generate_training_corpus(self, n_matches: int = 300) -> list[MockFootballMatchResult]:

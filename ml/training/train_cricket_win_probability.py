@@ -126,10 +126,10 @@ def main():
     ensemble.save(artifact_path)
     print(f"\nsaved artifact to {artifact_path}")
 
-    _persist_to_db(version, split, test_metrics, artifact_path)
+    _persist_to_db(version, split, validation_metrics, test_metrics, artifact_path)
 
 
-def _persist_to_db(version, split, test_metrics, artifact_path):
+def _persist_to_db(version, split, validation_metrics, test_metrics, artifact_path):
     database_url = os.environ.get("DATABASE_URL")
     if not database_url:
         print("DATABASE_URL not set — skipping model_versions/model_metrics persistence")
@@ -142,6 +142,7 @@ def _persist_to_db(version, split, test_metrics, artifact_path):
 
     from database.models.enums import Sport
     from database.models.predictions import ModelMetric, ModelVersion
+    from ml.backtesting.runner import persist_backtest_run
 
     engine = create_engine(database_url)
     with Session(engine) as session:
@@ -170,8 +171,23 @@ def _persist_to_db(version, split, test_metrics, artifact_path):
                     evaluated_at=datetime.now(timezone.utc),
                 )
             )
+
+        backtest_run = persist_backtest_run(
+            session,
+            sport=Sport.CRICKET,
+            model_name=MODEL_NAME,
+            model_version=version,
+            train_range=split.train_range,
+            validation_range=split.validation_range,
+            test_range=split.test_range,
+            metrics={"validation": validation_metrics, "test": test_metrics},
+            notes="Trained on MockCricketProvider synthetic data — see docs/DATA_SOURCES.md.",
+        )
         session.commit()
-        print(f"persisted model_versions.id={model_version.id} with {len(test_metrics['ensemble'])} metrics")
+        print(
+            f"persisted model_versions.id={model_version.id}, "
+            f"backtest_runs.id={backtest_run.id} with {len(test_metrics['ensemble'])} ensemble metrics"
+        )
 
 
 if __name__ == "__main__":

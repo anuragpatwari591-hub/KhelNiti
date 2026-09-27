@@ -93,3 +93,43 @@ def expected_calibration_error(predicted_probs: list[float], actual_outcomes: li
 def _check_same_length(a: list, b: list) -> None:
     if len(a) != len(b):
         raise ValueError(f"predicted_probs and actual_outcomes must be the same length, got {len(a)} vs {len(b)}")
+
+
+def multiclass_brier_score(predicted_distributions: list[dict[str, float]], actual_labels: list[str]) -> float:
+    """Generalized (Brier/Rao) score for a K-outcome forecast, e.g. cricket
+    or football match result (home/draw/away): mean squared error between
+    the full predicted distribution and the one-hot actual outcome, summed
+    over outcomes. 0 is perfect; for a 3-outcome forecast a "no skill"
+    forecaster predicting the population base rates scores well above 0.
+    """
+    _check_same_length(predicted_distributions, actual_labels)
+    n = len(predicted_distributions)
+    if n == 0:
+        raise ValueError("no predictions to score")
+    total = 0.0
+    for dist, actual in zip(predicted_distributions, actual_labels):
+        total += sum((p - (1.0 if outcome == actual else 0.0)) ** 2 for outcome, p in dist.items())
+    return total / n
+
+
+def multiclass_log_loss(predicted_distributions: list[dict[str, float]], actual_labels: list[str], eps: float = 1e-12) -> float:
+    _check_same_length(predicted_distributions, actual_labels)
+    n = len(predicted_distributions)
+    if n == 0:
+        raise ValueError("no predictions to score")
+    total = 0.0
+    for dist, actual in zip(predicted_distributions, actual_labels):
+        p = min(max(dist.get(actual, 0.0), eps), 1 - eps)
+        total += -math.log(p)
+    return total / n
+
+
+def multiclass_accuracy(predicted_distributions: list[dict[str, float]], actual_labels: list[str]) -> float:
+    _check_same_length(predicted_distributions, actual_labels)
+    n = len(predicted_distributions)
+    if n == 0:
+        raise ValueError("no predictions to score")
+    correct = sum(
+        1 for dist, actual in zip(predicted_distributions, actual_labels) if max(dist, key=dist.get) == actual
+    )
+    return correct / n
