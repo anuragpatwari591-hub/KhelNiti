@@ -63,6 +63,8 @@ def ingest_cricket_match(
     for d in deliveries:
         by_innings[d.innings_number].append(d)
 
+    innings_totals: dict[int, int] = {}
+
     for innings_number, innings_deliveries in sorted(by_innings.items()):
         validate_delivery_sequence_monotonic(innings_deliveries)
         for d in innings_deliveries:
@@ -73,12 +75,18 @@ def ingest_cricket_match(
         last = innings_deliveries[-1]
         total_runs = last.score_before_ball + last.runs_batter + last.runs_extras
         total_wickets = last.wickets_before_ball + (1 if last.is_wicket else 0)
+        innings_totals[innings_number] = total_runs
+
+        # The chase target is the previous innings' total + 1 — the same
+        # convention the mock provider and ml/cricket/features.py assume.
+        target = innings_totals[innings_number - 1] + 1 if (innings_number - 1) in innings_totals else None
 
         innings = Innings(
             match_id=match.id,
             innings_number=innings_number,
             batting_team_id=batting_team.id,
             bowling_team_id=bowling_team.id,
+            target=target,
             total_runs=total_runs,
             total_wickets=total_wickets,
             total_overs_bowled=innings_deliveries[-1].over_number + 1,
